@@ -8,6 +8,8 @@ classdef MapEditor < handle
         CLICK_MODE_ADD_ENTRANCE_VERTEX = 4;
         CLICK_MODE_ADD_EXIT_VERTEX = 5;
         CLICK_MODE_REM_VERTEX = 6;
+        CLICK_MODE_SPECIAL_EDGE_V1 = 7;
+        CLICK_MODE_SPECIAL_EDGE_V2 = 8;
         
         ZOOM_IN_FACTOR = 1.25;
         ZOOM_OUT_FACTOR = 0.75;
@@ -27,8 +29,8 @@ classdef MapEditor < handle
         m_ImageFileName;
         m_VertexPath;
         m_VertexFileName;
-        m_EdgePath;
-        m_EdgeFileName;
+        m_SpecialEdgePath;
+        m_SpecialEdgeFileName;
         
         % internal variables
         m_Image;
@@ -42,12 +44,14 @@ classdef MapEditor < handle
         m_MetersPerPixel;
         m_PixelsPerVertex;
         m_MouseMode;
+        m_MouseModePrev;
         
         m_VertexList;
         m_NumVertices;
         m_EdgeList;
         m_NumEdges;
         m_SpecialEdgeList;
+        m_SpecialEdgeRecord;
     end
     
     methods(Access = public)
@@ -76,7 +80,7 @@ classdef MapEditor < handle
 
             % Edit the above text to modify the response to help MapEditor
 
-            % Last Modified by GUIDE v2.5 07-Feb-2016 13:59:50
+            % Last Modified by GUIDE v2.5 12-Feb-2016 18:34:15
 
             % Begin initialization code - DO NOT EDIT
             gui_Singleton = 1;
@@ -100,10 +104,13 @@ classdef MapEditor < handle
             Obj.m_ImageFileName = [];
             Obj.m_VertexPath = [];
             Obj.m_VertexFileName = [];
-            Obj.m_EdgePath = [];
-            Obj.m_EdgeFileName = [];
+            Obj.m_SpecialEdgePath = [];
+            Obj.m_SpecialEdgeFileName = [];
             Obj.m_VertexList = [];
             Obj.m_EdgeList = [];
+            Obj.m_SpecialEdgeList.V1 = [];
+            Obj.m_SpecialEdgeList.V2 = [];
+            Obj.m_SpecialEdgeList.lengthMeters = [];
             Obj.m_CellImage = [];
             
             % populate form stuff
@@ -279,6 +286,27 @@ classdef MapEditor < handle
             Obj.m_EdgeList.V2 = Obj.m_EdgeList.V2(1:Obj.m_NumEdges);
             Obj.m_EdgeList.lengthMeters = Obj.m_EdgeList.lengthMeters(1:Obj.m_NumEdges);
             
+            % process special edges (only need remap)
+            nSpecialEdges = numel(Obj.m_SpecialEdgeList.V1);
+            for i = 1:nSpecialEdges
+                v1 = mapVec(Obj.m_SpecialEdgeList.V1(i));
+                v2 = mapVec(Obj.m_SpecialEdgeList.V2(i));
+                Obj.m_SpecialEdgeList.V1(i) = v1;
+                Obj.m_SpecialEdgeList.V2(i) = v2;
+                
+                % see if special edge interferes with any present edges
+                v1Flags = Obj.m_EdgeList.V1 == v1 | Obj.m_EdgeList.V2 == v1;
+                v2Flags = Obj.m_EdgeList.V1 == v2 | Obj.m_EdgeList.V2 == v2;
+                totFlags = v1Flags & v2Flags;
+                if(sum(totFlags) > 0)
+                    % found conflict; remove original edge in lieu of
+                    % special edge
+                    Obj.m_EdgeList.V1 = Obj.m_EdgeList.V1(~totFlags);
+                    Obj.m_EdgeList.V2 = Obj.m_EdgeList.V2(~totFlags);
+                    Obj.m_NumEdges = Obj.m_NumEdges - sum(totFlags);
+                end
+            end
+            
             % plot vertices if configured to
             if(Obj.m_Handles.chkShowVerticesWhenDone.Value)
                 Obj.m_Handles.axisMain;
@@ -300,7 +328,6 @@ classdef MapEditor < handle
             % plot edges if configured to
             if(Obj.m_Handles.chkShowEdgesWhenDone.Value)
                 Obj.m_Handles.axisMain;
-                % plot vertices
                 for i = 1:Obj.m_NumEdges
                     v1Idx = Obj.m_EdgeList.V1(i);
                     v2Idx = Obj.m_EdgeList.V2(i);
@@ -344,6 +371,73 @@ classdef MapEditor < handle
             end
             fclose(fid);
             
+            % write special edges
+            fid = fopen(fullfile(Obj.m_ImagePath, [Obj.m_ImageFileName, '.specialedge']), 'w');
+            fprintf(fid, '%i\n', numel(Obj.m_SpecialEdgeList.V1));
+            for i = 1:numel(Obj.m_SpecialEdgeList.V1)
+                fprintf(fid, '%i,%i,%f\n', ...
+                    Obj.m_SpecialEdgeList.V1(i)-1, ... %subtract 1 to make zero-based
+                    Obj.m_SpecialEdgeList.V2(i)-1, ... %subtract 1 to make zero-based
+                    Obj.m_SpecialEdgeList.lengthMeters(i));
+            end
+            fclose(fid);
+            
+        end
+        
+        function btnAddSpecialEdge_Callback()
+            Obj = MapEditor.GetSetInstance();
+            
+            % save current mouse mode for reinstating later
+            Obj.m_MouseModePrev = Obj.m_MouseMode;
+            
+            % style stuff
+            Obj.m_MouseMode = Obj.CLICK_MODE_SPECIAL_EDGE_V1;
+            Obj.applyMouseMode();
+            
+            % tell user what to do and color boxes
+            Obj.m_Handles.txtSpecialEdgePt2.BackgroundColor = [1.0 1.0 1.0];
+            Obj.m_Handles.txtSpecialEdgeWeight.BackgroundColor = [1.0 1.0 1.0];
+            Obj.m_Handles.txtSpecialEdgePt1.String = 'Click on Map!';
+            Obj.m_Handles.txtSpecialEdgePt1.BackgroundColor = [1.0 0.5 0.5];
+        end
+        
+        function btnSpecialEdgeSubmit_Callback()
+            Obj = MapEditor.GetSetInstance();
+            
+            if(Obj.m_MouseMode == Obj.CLICK_MODE_SPECIAL_EDGE_V2)
+                % add special edge
+                Obj.m_SpecialEdgeList.V1(end+1) = Obj.m_SpecialEdgeRecord.V1;
+                Obj.m_SpecialEdgeList.V2(end+1) = Obj.m_SpecialEdgeRecord.V2;
+                
+                myLength = str2double(Obj.m_Handles.txtSpecialEdgeWeight.String);
+                Obj.m_SpecialEdgeList.lengthMeters(end+1) = myLength;
+                
+                % plot special edge
+                nCellCols = size(Obj.m_CellFlags, 2);
+                xy1 = [ ...
+                    rem(Obj.m_SpecialEdgeRecord.V1, nCellCols), ...
+                    floor(Obj.m_SpecialEdgeRecord.V1 / nCellCols)+1];
+                xy2 = [ ...
+                    rem(Obj.m_SpecialEdgeRecord.V2, nCellCols), ...
+                    floor(Obj.m_SpecialEdgeRecord.V2 / nCellCols)+1];
+                Obj.m_Handles.axisMain;
+                pixCoord1 = MapEditor.cellCoord2PlotCoord(xy1);
+                pixCoord2 = MapEditor.cellCoord2PlotCoord(xy2);
+                plot(Obj.m_Handles.axisMain, ...
+                    [pixCoord1(1) pixCoord2(1)], ...
+                    [pixCoord1(2) pixCoord2(2)], ...
+                    '.-r');
+                
+                % update form elements
+                Obj.m_Handles.txtSpecialEdgePt1.BackgroundColor = [1.0 1.0 1.0];
+                Obj.m_Handles.txtSpecialEdgePt1.String = '';
+                Obj.m_Handles.txtSpecialEdgePt2.BackgroundColor = [1.0 1.0 1.0];
+                Obj.m_Handles.txtSpecialEdgePt2.String = '';
+                Obj.m_Handles.txtSpecialEdgeWeight.BackgroundColor = [1.0 1.0 1.0];
+                Obj.m_Handles.txtSpecialEdgeWeight.String = '';
+                Obj.m_MouseMode = Obj.m_MouseModePrev;
+                MapEditor.applyMouseMode();
+            end
         end
         
         function btnZoomIn_Callback()
@@ -430,8 +524,47 @@ classdef MapEditor < handle
             end
         end
         
-        function menuFile_OpenEdgeList_Callback()
+        function menuFile_OpenSpecialEdgeList_Callback()
             Obj = MapEditor.GetSetInstance();
+            
+            % ask for image file
+            [Obj.m_SpecialEdgeFileName, Obj.m_SpecialEdgePath] = uigetfile({'*.specialedge'}, 'Select Special Edge File');
+            
+            % make sure user selected something and image exists
+            if(numel(Obj.m_SpecialEdgeFileName) > 1 && numel(Obj.m_SpecialEdgePath) > 1 && ...
+               numel(Obj.m_ImageFileName) > 1 && numel(Obj.m_ImagePath) > 1)
+                % read special edge file
+                fid = fopen(fullfile(Obj.m_SpecialEdgePath, Obj.m_SpecialEdgeFileName), 'r');
+                
+                nSpecialEdges = textscan(fid, '%f', 1);
+                Obj.m_SpecialEdgeList.V1 = -1 * ones(nSpecialEdges{1},1);
+                Obj.m_SpecialEdgeList.V2 = -1 * ones(nSpecialEdges{1},1);
+                Obj.m_SpecialEdgeList.lengthMeters = -1 * ones(nSpecialEdges{1},1);
+                
+                V = textscan(fid, '%f %f %f', 'Delimiter', ',');
+                for i = 1:nSpecialEdges{1}
+                    v1 = V{1}(i) + 1;
+                    v2 = V{2}(i) + 1;
+                    Obj.m_SpecialEdgeList.lengthMeters(i) = V{3}(i);
+                    
+                    pixCoord1 = [Obj.m_VertexList.pixX(v1), Obj.m_VertexList.pixY(v1)];
+                    pixCoord2 = [Obj.m_VertexList.pixX(v2), Obj.m_VertexList.pixY(v2)];
+                    plot(Obj.m_Handles.axisMain, ...
+                        [pixCoord1(1) pixCoord2(1)], ...
+                        [pixCoord1(2) pixCoord2(2)], ...
+                        '.-r');
+                    
+                    nCols = size(Obj.m_CellFlags, 2);
+                    cellCoord1 = [Obj.m_VertexList.cellX(v1), Obj.m_VertexList.cellY(v1)];
+                    idx1 = (cellCoord1(2)-1) * nCols + cellCoord1(1);
+                    cellCoord2 = [Obj.m_VertexList.cellX(v2), Obj.m_VertexList.cellY(v2)];
+                    idx2 = (cellCoord2(2)-1) * nCols + cellCoord2(1);
+                    Obj.m_SpecialEdgeList.V1(i) = idx1;
+                    Obj.m_SpecialEdgeList.V2(i) = idx2;
+                end
+
+                fclose(fid);
+            end
         end
         
         function radMouseNone_Callback()
@@ -584,6 +717,10 @@ classdef MapEditor < handle
                    Obj.m_MouseMode == Obj.CLICK_MODE_REM_VERTEX)
                 set(h, 'Enable', 'off');
                 set(Obj.m_Handles.figureMain, 'Pointer', 'crosshair');
+            elseif(Obj.m_MouseMode == Obj.CLICK_MODE_SPECIAL_EDGE_V1 || ...
+                   Obj.m_MouseMode == Obj.CLICK_MODE_SPECIAL_EDGE_V2)
+                set(h, 'Enable', 'off');
+                set(Obj.m_Handles.figureMain, 'Pointer', 'crosshair');
             else
                 set(Obj.m_Handles.figureMain, 'Pointer', 'arrow');
             end
@@ -634,6 +771,23 @@ classdef MapEditor < handle
                     MapEditor.setCellImageValue(cc, 0);%[0 0 0]);
 %                     fprintf('Toggled cell to false\n');
                 end
+            elseif(Obj.m_MouseMode == Obj.CLICK_MODE_SPECIAL_EDGE_V1)
+                nCols = size(Obj.m_CellFlags, 2);
+                idx = (cc(2)-1) * nCols + cc(1);
+                Obj.m_SpecialEdgeRecord.V1 = idx;
+                Obj.m_Handles.txtSpecialEdgePt1.String = 'Got it!';
+                Obj.m_Handles.txtSpecialEdgePt1.BackgroundColor = [1.0 1.0 1.0];
+                Obj.m_Handles.txtSpecialEdgePt2.String = 'Click on Map!';
+                Obj.m_Handles.txtSpecialEdgePt2.BackgroundColor = [1.0 0.5 0.5];
+                Obj.m_MouseMode = Obj.CLICK_MODE_SPECIAL_EDGE_V2;
+            elseif(Obj.m_MouseMode == Obj.CLICK_MODE_SPECIAL_EDGE_V2)
+                nCols = size(Obj.m_CellFlags, 2);
+                idx = (cc(2)-1) * nCols + cc(1);
+                Obj.m_SpecialEdgeRecord.V2 = idx;
+                Obj.m_Handles.txtSpecialEdgePt2.String = 'Got it!';
+                Obj.m_Handles.txtSpecialEdgePt2.BackgroundColor = [1.0 1.0 1.0];
+                Obj.m_Handles.txtSpecialEdgeWeight.String = 0;
+                Obj.m_Handles.txtSpecialEdgeWeight.BackgroundColor = [1.0 0.5 0.5];
             end
         end
         
