@@ -40,6 +40,7 @@ classdef MapEditor < handle
         m_CellImage;
         m_CellImageHandle;
         m_CellImageAlpha;
+        m_CellColorSwatches;
         
         m_MetersPerPixel;
         m_PixelsPerVertex;
@@ -51,7 +52,11 @@ classdef MapEditor < handle
         m_EdgeList;
         m_NumEdges;
         m_SpecialEdgeList;
+        m_SpecialEdgeListForExport;
+        m_NumSpecialEdges;
         m_SpecialEdgeRecord;
+        
+        m_RectModeCoord;
     end
     
     methods(Access = public)
@@ -112,6 +117,9 @@ classdef MapEditor < handle
             Obj.m_SpecialEdgeList.V2 = [];
             Obj.m_SpecialEdgeList.lengthMeters = [];
             Obj.m_CellImage = [];
+            Obj.m_RectModeCoord = [];
+            
+            MapEditor.setupCellColorSwatches();
             
             % populate form stuff
             set(Obj.m_Handles.txtMetersPerPixel, 'String', Obj.m_MetersPerPixel);
@@ -186,11 +194,17 @@ classdef MapEditor < handle
             Obj.m_EdgeList.V2 = -1 * ones(maxNumEdges, 1);
             Obj.m_EdgeList.lengthMeters = -1 * ones(maxNumEdges, 1);
             
+            h = waitbar(0, 'Compiling vertices and edges...');
+            
             mpp = Obj.m_MetersPerPixel;
             ppv = Obj.m_PixelsPerVertex;
             nEdges = 0;
             for r = 1:nRows
+                
+                waitbar(r / nRows, h);
+                
                 for c = 1:nCols
+                    
                     if(Obj.m_CellFlags(r,c))
                         idx = (r-1) * nCols + c;
                         cellFlag1D(idx) = 1;
@@ -249,26 +263,53 @@ classdef MapEditor < handle
                 end %col loop
             end %row loop
             
+            close(h);
+            h = waitbar(0, 'Re-indexing vertices...');
+            
             % need to re-index to make vertices contiguous
             mapVec = cumsum(cellFlag1D);
-            for i = 1:nCells
-                if(cellFlag1D(i))
-                    % move vertex data
-                    Obj.m_VertexList.cellX(mapVec(i))   = Obj.m_VertexList.cellX(i);
-                    Obj.m_VertexList.cellY(mapVec(i))   = Obj.m_VertexList.cellY(i);
-                    Obj.m_VertexList.pixX(mapVec(i))    = Obj.m_VertexList.pixX(i);
-                    Obj.m_VertexList.pixY(mapVec(i))    = Obj.m_VertexList.pixY(i);
-                    Obj.m_VertexList.metersX(mapVec(i)) = Obj.m_VertexList.metersX(i);
-                    Obj.m_VertexList.metersY(mapVec(i)) = Obj.m_VertexList.metersY(i);
-                    Obj.m_VertexList.type(mapVec(i))    = Obj.m_VertexList.type(i);
-                end
-            end
+            cellFlags = cellFlag1D > 0;
+            
+            Obj.m_VertexList.cellX(mapVec(cellFlags))   = Obj.m_VertexList.cellX(cellFlags);
+            Obj.m_VertexList.cellY(mapVec(cellFlags))   = Obj.m_VertexList.cellY(cellFlags);
+            Obj.m_VertexList.pixX(mapVec(cellFlags))    = Obj.m_VertexList.pixX(cellFlags);
+            Obj.m_VertexList.pixY(mapVec(cellFlags))    = Obj.m_VertexList.pixY(cellFlags);
+            Obj.m_VertexList.metersX(mapVec(cellFlags)) = Obj.m_VertexList.metersX(cellFlags);
+            Obj.m_VertexList.metersY(mapVec(cellFlags)) = Obj.m_VertexList.metersY(cellFlags);
+            Obj.m_VertexList.type(mapVec(cellFlags))    = Obj.m_VertexList.type(cellFlags);
+%             for i = 1:nCells
+%                 
+%                 waitbar(i / nCells, h);
+%                 
+%                 if(cellFlag1D(i))
+%                     % move vertex data
+%                     Obj.m_VertexList.cellX(mapVec(i))   = Obj.m_VertexList.cellX(i);
+%                     Obj.m_VertexList.cellY(mapVec(i))   = Obj.m_VertexList.cellY(i);
+%                     Obj.m_VertexList.pixX(mapVec(i))    = Obj.m_VertexList.pixX(i);
+%                     Obj.m_VertexList.pixY(mapVec(i))    = Obj.m_VertexList.pixY(i);
+%                     Obj.m_VertexList.metersX(mapVec(i)) = Obj.m_VertexList.metersX(i);
+%                     Obj.m_VertexList.metersY(mapVec(i)) = Obj.m_VertexList.metersY(i);
+%                     Obj.m_VertexList.type(mapVec(i))    = Obj.m_VertexList.type(i);
+%                 end
+%             end
+            
+            waitbar(1, h);
+            close(h);
+            h = waitbar(0, 'Re-indexing edges...');
             
             % update edges so indexes are correct
-            for i = 1:nEdges
-                Obj.m_EdgeList.V1(i) = mapVec(Obj.m_EdgeList.V1(i));
-                Obj.m_EdgeList.V2(i) = mapVec(Obj.m_EdgeList.V2(i));
-            end
+            Obj.m_EdgeList.V1 = mapVec(Obj.m_EdgeList.V1(Obj.m_EdgeList.V1>0));
+            Obj.m_EdgeList.V2 = mapVec(Obj.m_EdgeList.V2(Obj.m_EdgeList.V2>0));
+            
+%             for i = 1:nEdges
+%                 waitbar(i / nEdges, h);
+%                 Obj.m_EdgeList.V1(i) = mapVec(Obj.m_EdgeList.V1(i));
+%                 Obj.m_EdgeList.V2(i) = mapVec(Obj.m_EdgeList.V2(i));
+%             end
+
+            waitbar(1, h);
+            close(h);
+            h = waitbar(0, 'Completing...');
             
             % shorten vertex list
             Obj.m_NumVertices = sum(cellFlag1D);
@@ -288,11 +329,12 @@ classdef MapEditor < handle
             
             % process special edges (only need remap)
             nSpecialEdges = numel(Obj.m_SpecialEdgeList.V1);
+            Obj.m_SpecialEdgeListForExport = Obj.m_SpecialEdgeList; % make copy
             for i = 1:nSpecialEdges
                 v1 = mapVec(Obj.m_SpecialEdgeList.V1(i));
                 v2 = mapVec(Obj.m_SpecialEdgeList.V2(i));
-                Obj.m_SpecialEdgeList.V1(i) = v1;
-                Obj.m_SpecialEdgeList.V2(i) = v2;
+                Obj.m_SpecialEdgeListForExport.V1(i) = v1;
+                Obj.m_SpecialEdgeListForExport.V2(i) = v2;
                 
                 % see if special edge interferes with any present edges
                 v1Flags = Obj.m_EdgeList.V1 == v1 | Obj.m_EdgeList.V2 == v1;
@@ -306,6 +348,10 @@ classdef MapEditor < handle
                     Obj.m_NumEdges = Obj.m_NumEdges - sum(totFlags);
                 end
             end
+            
+            waitbar(1, h);
+            close(h);
+            h = waitbar(0, 'Plotting...');
             
             % plot vertices if configured to
             if(Obj.m_Handles.chkShowVerticesWhenDone.Value)
@@ -325,10 +371,13 @@ classdef MapEditor < handle
                 plot(Obj.m_Handles.axisMain, exitX, exitY, '.', 'markersize', 2, 'color', [0.5 0 0]);
             end
             
+            waitbar(0.5, h);
+            
             % plot edges if configured to
             if(Obj.m_Handles.chkShowEdgesWhenDone.Value)
                 Obj.m_Handles.axisMain;
                 for i = 1:Obj.m_NumEdges
+                    waitbar(0.5 + 0.5 * (i / Obj.m_NumEdges), h);
                     v1Idx = Obj.m_EdgeList.V1(i);
                     v2Idx = Obj.m_EdgeList.V2(i);
                     plot(Obj.m_Handles.axisMain, ...
@@ -338,10 +387,16 @@ classdef MapEditor < handle
                 end
                 plot(Obj.m_Handles.axisMain, Obj.m_VertexList.pixX, Obj.m_VertexList.pixY, '.b', 'markersize', 2);
             end
+            
+            close(h);
+            
+            fprintf('Completed making vertices and edges.\n');
         end %function
         
         function btnExportGraph_Callback()
             Obj = MapEditor.GetSetInstance();
+            
+            h = waitbar(0, 'Exporting veritces...');
             
             % write vertices
             fid = fopen(fullfile(Obj.m_ImagePath, [Obj.m_ImageFileName, '.vertex']), 'w');
@@ -357,8 +412,15 @@ classdef MapEditor < handle
                     Obj.m_VertexList.metersX(i), ...
                     Obj.m_VertexList.metersY(i), ...
                     Obj.m_VertexList.type(i));
+                
+                if(rem(i, 100) == 0)
+                    waitbar(i / Obj.m_NumVertices, h);
+                end
             end
             fclose(fid);
+            
+            close(h);
+            h = waitbar(0, 'Exporting edges...');
             
             % write edges
             fid = fopen(fullfile(Obj.m_ImagePath, [Obj.m_ImageFileName, '.edge']), 'w');
@@ -368,19 +430,31 @@ classdef MapEditor < handle
                     Obj.m_EdgeList.V1(i)-1, ... %subtract 1 to make zero-based
                     Obj.m_EdgeList.V2(i)-1, ... %subtract 1 to make zero-based
                     Obj.m_EdgeList.lengthMeters(i));
+                
+                if(rem(i, 100) == 0)
+                    waitbar(i / Obj.m_NumEdges, h);
+                end
             end
             fclose(fid);
+            
+            close(h);
+            h = waitbar(0, 'Exporting special edges...');
             
             % write special edges
             fid = fopen(fullfile(Obj.m_ImagePath, [Obj.m_ImageFileName, '.specialedge']), 'w');
             fprintf(fid, '%i\n', numel(Obj.m_SpecialEdgeList.V1));
             for i = 1:numel(Obj.m_SpecialEdgeList.V1)
                 fprintf(fid, '%i,%i,%f\n', ...
-                    Obj.m_SpecialEdgeList.V1(i)-1, ... %subtract 1 to make zero-based
-                    Obj.m_SpecialEdgeList.V2(i)-1, ... %subtract 1 to make zero-based
-                    Obj.m_SpecialEdgeList.lengthMeters(i));
+                    Obj.m_SpecialEdgeListForExport.V1(i)-1, ... %subtract 1 to make zero-based
+                    Obj.m_SpecialEdgeListForExport.V2(i)-1, ... %subtract 1 to make zero-based
+                    Obj.m_SpecialEdgeListForExport.lengthMeters(i));
+                waitbar(i / numel(Obj.m_SpecialEdgeList.V1), h);
             end
             fclose(fid);
+            
+            close(h);
+            
+            fprintf('Export complete.\n');
             
         end
         
@@ -450,6 +524,21 @@ classdef MapEditor < handle
             zoom(Obj.m_Handles.axisMain, Obj.ZOOM_OUT_FACTOR);
         end
         
+        function chkUseRectangleSelect_Callback()
+            Obj = MapEditor.GetSetInstance();
+            
+            if(Obj.m_Handles.chkUseRectangleSelect.Value == 0)
+                % unchecked, reset stuff
+                Obj.m_RectModeCoord = [];
+            
+                % modify text
+                oldStr = Obj.m_Handles.chkUseRectangleSelect.String;
+                oldStrLen = numel(oldStr);
+                newStr = [oldStr(1:oldStrLen-2) '-)'];
+                Obj.m_Handles.chkUseRectangleSelect.String = newStr;
+            end
+        end
+        
         function chkShowGrid_Callback()
             MapEditor.toggleGrid();
         end
@@ -494,6 +583,7 @@ classdef MapEditor < handle
                 Obj.m_PixelsPerVertex = ppv{1};
                 set(Obj.m_Handles.txtPixelsPerVertex, 'String', num2str(ppv{1}));
                 
+                MapEditor.setupCellColorSwatches();
                 MapEditor.setupGrid();
                 
                 nVertices = textscan(fid, '%f', 1);
@@ -505,8 +595,15 @@ classdef MapEditor < handle
                 Obj.m_VertexList.metersY = -1 * ones(nVertices{1},1);
                 Obj.m_VertexList.type    = -1 * ones(nVertices{1},1);
                 
+                h = waitbar(0, 'Importing veritces...');
+                
                 V = textscan(fid, '%f %f %f %f %f %f %f', 'Delimiter', ',');
                 for i = 1:nVertices{1}
+                    
+                    if(rem(i, 100) == 0)
+                        waitbar(i / nVertices{1}, h);
+                    end
+                    
                     Obj.m_VertexList.cellX(i) = V{1}(i);
                     Obj.m_VertexList.cellY(i) = V{2}(i);
                     Obj.m_VertexList.pixX(i) = V{3}(i);
@@ -517,8 +614,16 @@ classdef MapEditor < handle
                     
                     cc = [Obj.m_VertexList.cellX(i), Obj.m_VertexList.cellY(i)];
                     Obj.m_CellFlags(cc(2), cc(1)) = Obj.m_VertexList.type(i);
-                    MapEditor.setCellImageValue(cc, Obj.m_CellFlags(cc(2),cc(1)))
+                    
+                    % set cell image values but do not display
+                    MapEditor.setCellImageValue(cc, Obj.m_CellFlags(cc(2),cc(1)), false)
                 end
+                
+                % display cell image now
+                set(Obj.m_CellImageHandle, 'AlphaData', Obj.m_CellImageAlpha);
+                set(Obj.m_CellImageHandle, 'CData', Obj.m_CellImage);
+                
+                close(h);
 
                 fclose(fid);
             end
@@ -619,7 +724,8 @@ classdef MapEditor < handle
             newVal = str2double(get(Obj.m_Handles.txtPixelsPerVertex, 'String'));
             if(Obj.m_PixelsPerVertex ~= newVal)
                 Obj.m_PixelsPerVertex = newVal;
-                MapEditor.setupImage()
+                MapEditor.setupImage();
+                MapEditor.setupCellColorSwatches();
                 MapEditor.setupGrid();
                 MapEditor.toggleGrid();
             end
@@ -676,6 +782,8 @@ classdef MapEditor < handle
             Obj.m_CellImage = zeros([size(Obj.m_Image, 1), size(Obj.m_Image, 2), 3]);
             
             MapEditor.plotGrid();
+            
+            Obj.m_RectModeCoord = [];
         end
         
         function plotGrid()
@@ -744,31 +852,31 @@ classdef MapEditor < handle
             if(Obj.m_MouseMode == Obj.CLICK_MODE_ADD_SIDEWALK_VERTEX)
                 if(Obj.m_CellFlags(cc(2), cc(1)) ~= Obj.NODE_TYPE_SIDEWALK)
                     Obj.m_CellFlags(cc(2), cc(1)) = Obj.NODE_TYPE_SIDEWALK;
-                    MapEditor.setCellImageValue(cc, Obj.NODE_TYPE_SIDEWALK);%[0 1 1]);
+                    MapEditor.setCellImageValue(cc, Obj.NODE_TYPE_SIDEWALK, true);
 %                     fprintf('Toggled cell to true\n');
                 end
             elseif(Obj.m_MouseMode == Obj.CLICK_MODE_ADD_ROAD_VERTEX)
                 if(Obj.m_CellFlags(cc(2), cc(1)) ~= Obj.NODE_TYPE_ROAD)
                     Obj.m_CellFlags(cc(2), cc(1)) = Obj.NODE_TYPE_ROAD;
-                    MapEditor.setCellImageValue(cc, Obj.NODE_TYPE_ROAD);%[1 1 0.5]);
+                    MapEditor.setCellImageValue(cc, Obj.NODE_TYPE_ROAD, true);
 %                     fprintf('Toggled cell to true\n');
                 end
             elseif(Obj.m_MouseMode == Obj.CLICK_MODE_ADD_ENTRANCE_VERTEX)
                 if(Obj.m_CellFlags(cc(2), cc(1)) ~= Obj.NODE_TYPE_ENTRANCE)
                     Obj.m_CellFlags(cc(2), cc(1)) = Obj.NODE_TYPE_ENTRANCE;
-                    MapEditor.setCellImageValue(cc, Obj.NODE_TYPE_ENTRANCE);%[0.5 1 0.5]);
+                    MapEditor.setCellImageValue(cc, Obj.NODE_TYPE_ENTRANCE, true);
 %                     fprintf('Toggled cell to true\n');
                 end
             elseif(Obj.m_MouseMode == Obj.CLICK_MODE_ADD_EXIT_VERTEX)
                 if(Obj.m_CellFlags(cc(2), cc(1)) ~= Obj.NODE_TYPE_EXIT)
                     Obj.m_CellFlags(cc(2), cc(1)) = Obj.NODE_TYPE_EXIT;
-                    MapEditor.setCellImageValue(cc, Obj.NODE_TYPE_EXIT);%[1 0.5 0.5]);
+                    MapEditor.setCellImageValue(cc, Obj.NODE_TYPE_EXIT, true);
 %                     fprintf('Toggled cell to true\n');
                 end
             elseif(Obj.m_MouseMode == Obj.CLICK_MODE_REM_VERTEX)
                 if(Obj.m_CellFlags(cc(2), cc(1)))
                     Obj.m_CellFlags(cc(2), cc(1)) = false;
-                    MapEditor.setCellImageValue(cc, 0);%[0 0 0]);
+                    MapEditor.setCellImageValue(cc, 0, true);
 %                     fprintf('Toggled cell to false\n');
                 end
             elseif(Obj.m_MouseMode == Obj.CLICK_MODE_SPECIAL_EDGE_V1)
@@ -789,49 +897,118 @@ classdef MapEditor < handle
                 Obj.m_Handles.txtSpecialEdgeWeight.String = 0;
                 Obj.m_Handles.txtSpecialEdgeWeight.BackgroundColor = [1.0 0.5 0.5];
             end
+            
+            % rectangle mode checks
+            if(Obj.m_Handles.chkUseRectangleSelect.Value > 0 && ...
+               ~isempty(Obj.m_MouseMode))
+                if(Obj.m_MouseMode == Obj.CLICK_MODE_ADD_SIDEWALK_VERTEX || ...
+                   Obj.m_MouseMode == Obj.CLICK_MODE_ADD_ROAD_VERTEX || ...
+                   Obj.m_MouseMode == Obj.CLICK_MODE_ADD_ENTRANCE_VERTEX || ...
+                   Obj.m_MouseMode == Obj.CLICK_MODE_ADD_EXIT_VERTEX || ...
+                   Obj.m_MouseMode == Obj.CLICK_MODE_REM_VERTEX)
+                    
+                    % see if user already clicked once
+                    if(isempty(Obj.m_RectModeCoord))
+                        % didn't click yet, store for later
+                        Obj.m_RectModeCoord = cc;
+                        
+                        % modify text to indicate we got it
+                        oldStr = Obj.m_Handles.chkUseRectangleSelect.String;
+                        oldStrLen = numel(oldStr);
+                        newStr = [oldStr(1:oldStrLen-2) '1)'];
+                        Obj.m_Handles.chkUseRectangleSelect.String = newStr;
+                    else
+                        % get node type to do fill with
+                        nodeType = 0;
+                        if(Obj.m_MouseMode == Obj.CLICK_MODE_ADD_SIDEWALK_VERTEX)
+                            nodeType = Obj.NODE_TYPE_SIDEWALK;
+                        elseif(Obj.m_MouseMode == Obj.CLICK_MODE_ADD_ROAD_VERTEX)
+                            nodeType = Obj.NODE_TYPE_ROAD;    
+                        elseif(Obj.m_MouseMode == Obj.CLICK_MODE_ADD_ENTRANCE_VERTEX)
+                            nodeType = Obj.NODE_TYPE_ENTRANCE;
+                        elseif(Obj.m_MouseMode == Obj.CLICK_MODE_ADD_EXIT_VERTEX)
+                            nodeType = Obj.NODE_TYPE_EXIT;
+                        elseif(Obj.m_MouseMode == Obj.CLICK_MODE_REM_VERTEX)
+                            nodeType = 0;
+                        end
+                        
+                        % ready to do rectangular fill
+                        MapEditor.setCellImageValue([cc; Obj.m_RectModeCoord], nodeType, true);
+                        xCellMin = min(cc(1), Obj.m_RectModeCoord(1));
+                        xCellMax = max(cc(1), Obj.m_RectModeCoord(1));
+                        yCellMin = min(cc(2), Obj.m_RectModeCoord(2));
+                        yCellMax = max(cc(2), Obj.m_RectModeCoord(2));
+                        Obj.m_CellFlags(yCellMin:yCellMax, xCellMin:xCellMax) = nodeType;
+%                         for r = yCellMin:yCellMax
+%                             for c = xCellMin:xCellMax
+%                                 Obj.m_CellFlags(r, c) = nodeType;
+%                             end
+%                         end
+                        
+                        % clear stored point
+                        Obj.m_RectModeCoord = [];
+                        
+                        % modify text
+                        oldStr = Obj.m_Handles.chkUseRectangleSelect.String;
+                        oldStrLen = numel(oldStr);
+                        newStr = [oldStr(1:oldStrLen-2) '-)'];
+                        Obj.m_Handles.chkUseRectangleSelect.String = newStr;
+                    end
+                end
+            end
+            
         end
         
-        function setCellImageValue(cellCoord, vertexType)
+        function setCellImageValue(cellCoord, vertexType, setImages)
             Obj = MapEditor.GetSetInstance();
             
             % vertex type indicates color and alpha
-            switch(vertexType)
-                case Obj.NODE_TYPE_SIDEWALK
-                    rgbTriplet = [0 1 1];
-                    alphaVal = 0.5;
-                case Obj.NODE_TYPE_ROAD
-                    rgbTriplet = [1 1 0.5];
-                    alphaVal = 0.5;
-                case Obj.NODE_TYPE_ENTRANCE
-                    rgbTriplet = [0.5 1 0.5];
-                    alphaVal = 0.5;
-                case Obj.NODE_TYPE_EXIT
-                    rgbTriplet = [1 0.5 0.5];
-                    alphaVal = 0.5;
-                otherwise
-                    rgbTriplet = [0 0 0];
-                    alphaVal = 0;
+            alphaVal = 0.5;
+            if(vertexType == 0)
+                alphaVal = 0.0;
             end
             
             ppv = Obj.m_PixelsPerVertex;
-            startRow = (cellCoord(2) - 1) * ppv + 1;
-            stopRow = startRow + ppv - 1;
-            startCol = (cellCoord(1) - 1) * ppv + 1;
-            stopCol = startCol + ppv - 1;
+            if(size(cellCoord,1) > 1)
+                % case where two cells are passed (this forms a rectangle
+                % of cells to be filled)
+                cellXmin = min(cellCoord(:,1));
+                cellXmax = max(cellCoord(:,1));
+                cellYmin = min(cellCoord(:,2));
+                cellYmax = max(cellCoord(:,2));
+                cellRgnWidth = cellXmax - cellXmin + 1;
+                cellRgnHeight = cellYmax - cellYmin + 1;
+                
+                startRow = (cellYmin - 1) * ppv + 1;
+                stopRow = startRow + cellRgnHeight * ppv - 1;
+                startCol = (cellXmin - 1) * ppv + 1;
+                stopCol = startCol + cellRgnWidth * ppv - 1;
+                
+                rgbChunk = ones(stopRow - startRow + 1, ...
+                            stopCol - startCol + 1, ...
+                            3);
+                rgbChunk(:,:,1) = Obj.m_CellColorSwatches{vertexType + 1}(1,1,1);
+                rgbChunk(:,:,2) = Obj.m_CellColorSwatches{vertexType + 1}(1,1,2);
+                rgbChunk(:,:,3) = Obj.m_CellColorSwatches{vertexType + 1}(1,1,3);
+            
+                Obj.m_CellImage(startRow:stopRow, startCol:stopCol, :) = rgbChunk;
+            else
+                % case where single cell is passed
+                startRow = (cellCoord(2) - 1) * ppv + 1;
+                stopRow = startRow + ppv - 1;
+                startCol = (cellCoord(1) - 1) * ppv + 1;
+                stopCol = startCol + ppv - 1;
+                
+                Obj.m_CellImage(startRow:stopRow, startCol:stopCol, :) = ...
+                    Obj.m_CellColorSwatches{vertexType + 1};
+            end
             
             Obj.m_CellImageAlpha(startRow:stopRow, startCol:stopCol) = alphaVal;
             
-            rgbChunk = ones(stopRow - startRow + 1, ...
-                            stopCol - startCol + 1, ...
-                            3);
-            rgbChunk(:,:,1) = rgbTriplet(1);
-            rgbChunk(:,:,2) = rgbTriplet(2);
-            rgbChunk(:,:,3) = rgbTriplet(3);
-            
-            Obj.m_CellImage(startRow:stopRow, startCol:stopCol, :) = rgbChunk;
-            
-            set(Obj.m_CellImageHandle, 'AlphaData', Obj.m_CellImageAlpha);
-            set(Obj.m_CellImageHandle, 'CData', Obj.m_CellImage);
+            if(setImages)
+                set(Obj.m_CellImageHandle, 'AlphaData', Obj.m_CellImageAlpha);
+                set(Obj.m_CellImageHandle, 'CData', Obj.m_CellImage);
+            end
         end
         
         function [plotCoord, cellCoord] = calcCellCoord(coordIn)
@@ -899,6 +1076,43 @@ classdef MapEditor < handle
                 MapEditor.radMouseRemVertex_Callback();
                 Obj.m_Handles.radMouseRemVertex.Value = 1;
             end
+        end
+        
+        function setupCellColorSwatches()
+            Obj = MapEditor.GetSetInstance();
+            ppv = Obj.m_PixelsPerVertex;
+            
+            % no type
+            rgbChunk = zeros(ppv, ppv, 3);
+            Obj.m_CellColorSwatches{1} = rgbChunk;
+            
+            % sidewalk
+            rgbChunk = ones(ppv, ppv, 3);
+            rgbChunk(:,:,1) = 0;
+            rgbChunk(:,:,2) = 1;
+            rgbChunk(:,:,3) = 1;
+            Obj.m_CellColorSwatches{Obj.NODE_TYPE_SIDEWALK + 1} = rgbChunk;
+            
+            % road
+            rgbChunk = ones(ppv, ppv, 3);
+            rgbChunk(:,:,1) = 1;
+            rgbChunk(:,:,2) = 1;
+            rgbChunk(:,:,3) = 0.5;
+            Obj.m_CellColorSwatches{Obj.NODE_TYPE_ROAD + 1} = rgbChunk;
+            
+            % entrance
+            rgbChunk = ones(ppv, ppv, 3);
+            rgbChunk(:,:,1) = 0.5;
+            rgbChunk(:,:,2) = 1;
+            rgbChunk(:,:,3) = 0.5;
+            Obj.m_CellColorSwatches{Obj.NODE_TYPE_ENTRANCE + 1} = rgbChunk;
+            
+            % exit
+            rgbChunk = ones(ppv, ppv, 3);
+            rgbChunk(:,:,1) = 1;
+            rgbChunk(:,:,2) = 0.5;
+            rgbChunk(:,:,3) = 0.5;
+            Obj.m_CellColorSwatches{Obj.NODE_TYPE_EXIT + 1} = rgbChunk;
         end
 
         
